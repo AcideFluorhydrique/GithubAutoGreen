@@ -1,0 +1,115 @@
+name: ci
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autogreen
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "1 1 * * 1-5"   # CHANGED: 改回只有週一到週五，週末留給你自己
+
+jobs:
+  autogreen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Auto commit
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          USER_EMAIL: "139669368+AcideFluorhydrique@users.noreply.github.com"   # 填回你自己的 noreply 信箱
+          USER_NAME: "AcideFluorhydrique"    # 填回你自己的 GitHub 使用者名稱
+        run: |
+          rand() { echo $(( $(od -An -N4 -tu4 /dev/urandom) % $1 )); }
+
+          # CHANGED: 週末（含手動觸發）直接跳過，避免 REMAIN <= 0
+          DAY_OF_WEEK=$(date -u +%u)   # 1=Mon ... 7=Sun
+          if [ "$DAY_OF_WEEK" -ge 6 ]; then
+            echo "Weekend, skipping (your own real commits live here)"
+            exit 0
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            sleep "$(rand 14400)"
+          fi
+
+          git config --local user.email "${USER_EMAIL}"
+          git config --local user.name "${USER_NAME}"
+          git remote set-url origin https://x-access-token:${TOKEN}@github.com/${REPO}.git
+          git pull --rebase
+
+          MESSAGES=("fix typo" "update notes" "tidy up" "minor cleanup" "small tweak"
+                    "wip" "update readme" "fix formatting" "refactor a bit" "add todo" "sync" "update")
+
+          REMAIN=$((6 - DAY_OF_WEEK))   # CHANGED: 平日版，週一=5 ... 週五=1
+          WEEK_KEY=$(date -u +%G%V)
+          WEEK_START=$(date -u -d "-$((DAY_OF_WEEK-1)) days" +%F)
+
+          SALT="plan-salt"
+          H=$(echo "${WEEK_KEY}-${SALT}" | sha256sum | cut -c1-16)
+          ROLL=$((16#${H:0:8} % 100))
+          SUB=$((16#${H:8:8}))
+
+          # CHANGED: 三種週型：閒週 / 普通週 / 忙週
+          if   [ "$ROLL" -lt 15 ]; then TARGET=$((SUB % 2))        # 15% 閒週：0 或 1
+          elif [ "$ROLL" -lt 85 ]; then TARGET=$((3 + SUB % 3))    # 70% 普通週：3-5
+          else                          TARGET=5                    # 15% 忙週：每天一次
+          fi
+
+          CURRENT=$(git log --since="${WEEK_START} 00:00:00 +0000" --oneline -- notes.md | wc -l)
+          echo "Week $WEEK_KEY target=$TARGET current=$CURRENT remain_days=$REMAIN"
+
+          if [ "$CURRENT" -ge "$TARGET" ]; then
+            echo "Quota met (or dead week)"
+            exit 0
+          fi
+
+          LEFT=$((TARGET - CURRENT))
+          if [ "$LEFT" -ge "$REMAIN" ]; then
+            N=$(( (LEFT + REMAIN - 1) / REMAIN ))   # 忙週在此每天得到 N=1
+          elif [ "$(rand 100)" -lt $((LEFT * 100 / REMAIN)) ]; then
+            N=1
+          else
+            N=0
+          fi
+
+          if [ "$N" -eq 0 ]; then
+            echo "Skipping today ($CURRENT/$TARGET)"
+            exit 0
+          fi
+
+          if [ ! -f notes.md ]; then
+            for k in $(seq 1 100); do echo "- seed note $k"; done > notes.md
+          fi
+
+          for i in $(seq 1 $N); do
+            LINES=$(wc -l < notes.md)
+
+            if [ "$LINES" -le 1 ] || [ "$(rand 2)" -eq 0 ]; then
+              echo "- $(date -u +%F): note $(rand 100000)" >> notes.md
+              ACTION="add"
+            else
+              R=$(( $(rand "$LINES") + 1 ))
+              sed -i "${R}d" notes.md
+              ACTION="del"
+            fi
+            echo "step $i: $ACTION -> $(wc -l < notes.md) lines"
+
+            git add notes.md
+            git commit -m "${MESSAGES[$(rand ${#MESSAGES[@]})]}"
+
+            if [ "$i" -lt "$N" ]; then
+              sleep $((30 + $(rand 600)))
+            fi
+          done
+
+          git push
+          echo "Committed $N today ($((CURRENT + N))/$TARGET)"
