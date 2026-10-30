@@ -54,7 +54,6 @@
 - seed note 54
 - seed note 55
 - seed note 56
-- seed note 57
 - seed note 58
 - seed note 59
 - seed note 60
