@@ -24,7 +24,6 @@
 - seed note 24
 - seed note 25
 - seed note 26
-- seed note 27
 - seed note 28
 - seed note 29
 - seed note 30
