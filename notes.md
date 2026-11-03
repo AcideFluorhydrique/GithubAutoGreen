@@ -1,5 +1,4 @@
 - seed note 1
-- seed note 2
 - seed note 3
 - seed note 4
 - seed note 5
