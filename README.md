@@ -1,51 +1,50 @@
-# auto-green
+# GithubAutoGreen
 
-[![Build Status](https://github.com/AcideFluorhydrique/GithubAutoGreen/workflows/ci/badge.svg?branch=master)](https://github.com/AcideFluorhydrique/GithubAutoGreen/actions)
+[![ci](https://github.com/AcideFluorhydrique/GithubAutoGreen/actions/workflows/ci.yml/badge.svg)](https://github.com/AcideFluorhydrique/GithubAutoGreen/actions/workflows/ci.yml)
 
-自动保持 GitHub 提交状态常绿。
+A stochastic GitHub activity generator and **1D symmetric random walk** experiment powered by GitHub Actions.
 
-> a commit a day keeps your girlfriend away.
+Instead of producing a uniform, robotic grid of daily commits, this workflow simulates natural weekday developer activity while driving the line count of `notes.md` as a bounded random walk.
 
-## 原理
+## How It Works
 
-使用 GitHub Actions 的定时任务功能，每隔一段时间自动执行 `git commit`，提交信息为 "a commit a day keeps your girlfriend away"，灵感来自知乎问题[在 GitHub 上保持 365 天全绿是怎样一种体验？](https://www.zhihu.com/question/34043434/answer/57826281)下某匿名用户的回答：
+### 1. Stateless Weekly Quotas
+At the start of each run, the workflow hashes the ISO week identifier (`YYYYWW`) with a fixed salt (`SHA-256`) to deterministically assign a workload profile for the current week without requiring external state or caches:
 
-> 曾经保持了 200 多天全绿，但是冷落了女朋友，一直绿到现在。
+| Week Profile | Probability | Weekly Target (`TARGET`) |
+| :--- | :---: | :--- |
+| **Idle Week** | 15% | `0` or `1` commit |
+| **Normal Week** | 70% | `3` to `5` commits |
+| **Busy Week** | 15% | `5` commits (1 per weekday) |
 
-有关 Github Action 的原理，可查看官方文档 [Github Action 简介](https://docs.github.com/cn/actions/learn-github-actions/introduction-to-github-actions)
+### 2. Dynamic Pacing & Temporal Jitter
+* **Weekdays Only:** Runs Monday through Friday (`1 1 * * 1-5` UTC). Weekends are explicitly skipped—even on manual `workflow_dispatch` triggers—leaving Saturday and Sunday reserved for organic commits.
+* **Randomized Timing:** Scheduled runs sleep for a random interval of `0–14,400` seconds (up to 4 hours) before executing, spreading timestamps naturally across morning/midday working hours.
+* **Adaptive Daily Probability:** Let `LEFT` be the remaining weekly quota and `REMAIN` be the remaining weekdays. If `LEFT >= REMAIN`, the script commits the required catch-up count (`N`); otherwise, it commits with probability `LEFT / REMAIN`. Multiple commits in a single day are spaced by `30–630` seconds.
 
-## 使用
+### 3. 1D Symmetric Random Walk (`notes.md`)
+Rather than growing a log file indefinitely, `notes.md` is initialized with `100` seed lines ($L_0 = 100$) and evolves as a discrete-time random walk with a reflecting barrier at $L = 1$:
 
-- 点右上角 **Use this template** 按钮复制本 GitHub 仓库，**:warning: 千万不要 Fork，因为 fork 项目的动态并不会让你变绿 :warning:**
-- 修改 [ci.yml 文件的第 7、8 行](https://github.com/justjavac/auto-green/blob/master/.github/workflows/ci.yml#L7-L8) 去掉前面的 `#` 号
-- 修改 [ci.yml 文件的第 19、20 行](https://github.com/justjavac/auto-green/blob/master/.github/workflows/ci.yml#L19-L20) 为自己的 GitHub 账号和昵称
-- (可选) 你可以通过修改 [ci.yml 文件的第 8 行](https://github.com/justjavac/auto-green/blob/master/.github/workflows/ci.yml#L8)来调整频率
+$$L_{n+1} = \begin{cases} L_n + 1, & p = 0.5 \quad (\text{append a timestamped note}) \\ L_n - 1, & p = 0.5 \quad (\text{delete a random line, when } L_n > 1) \end{cases}$$
 
-计划任务语法有 5 个字段，中间用空格分隔，每个字段代表一个时间单位。
+When $L_n = 1$, the workflow forces an insertion ($P(L_{n+1} = 2 \mid L_n = 1) = 1$) so the file is never emptied. Over a typical year (~188 commits), the file length drifts naturally around $100 \pm 14$ lines, turning the Git history of `notes.md` into a record of a Brownian-like trajectory.
 
-```plain
-┌───────────── 分钟 (0 - 59)
-│ ┌───────────── 小时 (0 - 23)
-│ │ ┌───────────── 日 (1 - 31)
-│ │ │ ┌───────────── 月 (1 - 12 或 JAN-DEC)
-│ │ │ │ ┌───────────── 星期 (0 - 6 或 SUN-SAT)
-│ │ │ │ │
-│ │ │ │ │
-│ │ │ │ │
-* * * * *
-```
+## Usage
 
-每个时间字段的含义：
-
-|符号   | 描述        | 举例                                        |
-| ----- | -----------| -------------------------------------------|
-| `*`   | 任意值      | `* * * * *` 每天每小时每分钟                  |
-| `,`   | 值分隔符    | `1,3,4,7 * * * *` 每小时的 1 3 4 7 分钟       |
-| `-`   | 范围       | `1-6 * * * *` 每小时的 1-6 分钟               |
-| `/`   | 每         | `*/15 * * * *` 每隔 15 分钟                  |
-
-**注**：由于 GitHub Actions 的限制，如果设置为 `* * * * *` 实际的执行频率为每 5 分执行一次。
+1. **Create Your Repository:** Click **Use this template** -> **Create a new repository** at the top right.
+   > **Warning:** Do **not** fork this repository. GitHub does not count commits made to forked repositories toward your contribution graph.
+2. **Configure Git Identity:** Edit `.github/workflows/ci.yml` and update `USER_EMAIL` and `USER_NAME` with your GitHub noreply email and username:
+   ```yaml
+   env:
+     TOKEN: ${{ secrets.GITHUB_TOKEN }}
+     REPO: ${{ github.repository }}
+     USER_EMAIL: "your-id+username@users.noreply.github.com"
+     USER_NAME: "username"
+   ```
+3. **Optional Customization:**
+   * Change `SALT="plan-salt"` in `ci.yml` to generate your own unique sequence of idle/normal/busy weeks.
+   * Adjust the `cron` schedule (`1 1 * * 1-5`) to align the 4-hour jitter window with your local timezone.
+4. **Private Repository Visibility (Optional):** If you keep your repository private, enable **Private contributions** under **Profile -> Contribution settings** so the activity appears on your public profile.
 
 ## License
-
-[auto-green](https://github.com/justjavac/auto-green) is released under the MIT License. See the bundled [LICENSE](./LICENSE) file for details.
+[MIT License](./LICENSE)
