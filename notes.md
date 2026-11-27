@@ -30,7 +30,6 @@
 - seed note 33
 - seed note 34
 - seed note 35
-- seed note 36
 - seed note 37
 - seed note 39
 - seed note 40
